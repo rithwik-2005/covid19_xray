@@ -1,55 +1,58 @@
 import streamlit as st
 import numpy as np
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import image
 from PIL import Image
+import tensorflow as tf
 
-# Page configuration
-st.set_page_config(page_title="COVID-19 X-ray Classifier", page_icon="🫁")
+# Simplified page config
+st.set_page_config(page_title="COVID-19 Classifier", page_icon="🫁")
 
-# Load model with caching
+# Load model with error handling
 @st.cache_resource
-def load_covid_model():
-    return load_model('covid19_xray_model.h5')
+def load_model():
+    try:
+        return tf.keras.models.load_model('covid19_xray_model.h5')
+    except Exception as e:
+        st.error(f"Model loading failed: {str(e)}")
+        return None
 
-def preprocess_image(input_image):
-    img = input_image.convert('RGB').resize((256, 256))
-    return np.expand_dims(image.img_to_array(img), axis=0) / 255.0
+def preprocess_image(img):
+    img = img.convert('RGB').resize((256, 256))
+    img_array = tf.keras.preprocessing.image.img_to_array(img)
+    return np.expand_dims(img_array, axis=0) / 255.0
 
-def predict_covid(input_image, model):
-    img_array = preprocess_image(input_image)
-    return model.predict(img_array)[0][0]
-
-# Main app
 def main():
-    st.title("🫁 COVID-19 Chest X-ray Classifier")
-    st.warning("⚠️ Medical Disclaimer: For educational purposes only. Not for actual diagnosis.")
+    st.title("🫁 COVID-19 X-ray Classifier")
+    st.warning("⚠️ For educational purposes only. Not for medical diagnosis.")
     
-    model = load_covid_model()
+    model = load_model()
+    if not model:
+        return
     
-    st.sidebar.header("Instructions")
-    st.sidebar.markdown("1. Upload a chest X-ray\n2. Click 'Analyze'\n3. View results")
+    uploaded_file = st.file_uploader("Upload chest X-ray", type=['jpg', 'png', 'jpeg'])
     
-    uploaded_file = st.file_uploader("Choose an X-ray image...", type=['png', 'jpg', 'jpeg'])
-    
-    if uploaded_file:
-        image_pil = Image.open(uploaded_file)
-        st.image(image_pil, caption="Uploaded X-ray")
+    if uploaded_file and st.button("Analyze"):
+        img = Image.open(uploaded_file)
+        st.image(img, caption="Uploaded X-ray")
         
-        if st.button("Analyze X-ray"):
-            with st.spinner("Analyzing..."):
-                prediction = predict_covid(image_pil, model)
-                confidence = prediction * 100 if prediction > 0.5 else (1 - prediction) * 100
-                result = "Positive" if prediction > 0.5 else "Negative"
+        with st.spinner("Processing..."):
+            try:
+                img_array = preprocess_image(img)
+                prediction = model.predict(img_array)[0][0]
+                covid_prob = round(prediction * 100, 2)
+                normal_prob = round((1 - prediction) * 100, 2)
                 
-                st.success(f"Result: {result} for COVID-19")
-                st.write(f"Confidence: {confidence:.1f}%")
-                st.progress(confidence / 100)
+                st.subheader("Results")
+                col1, col2 = st.columns(2)
+                col1.metric("COVID-19 Probability", f"{covid_prob}%")
+                col2.metric("Normal Probability", f"{normal_prob}%")
                 
                 if prediction > 0.5:
-                    st.error("High likelihood of COVID-19. Please consult a doctor.")
+                    st.error("High COVID-19 risk - Please consult a doctor")
                 else:
-                    st.info("Low likelihood, but consult a doctor for clarity.")
+                    st.success("Low COVID-19 risk")
+                    
+            except Exception as e:
+                st.error(f"Analysis failed: {str(e)}")
 
 if __name__ == "__main__":
     main()
