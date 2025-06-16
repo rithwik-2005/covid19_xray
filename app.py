@@ -1,48 +1,55 @@
-import os
-from flask import Flask, request, render_template
+import streamlit as st
+import numpy as np
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
-import numpy as np
+from PIL import Image
 
-app = Flask(__name__)
+# Page configuration
+st.set_page_config(page_title="COVID-19 X-ray Classifier", page_icon="🫁")
 
-# Path to the model and upload folder
-MODEL_PATH = 'covid19_xray_model.h5'
-UPLOAD_FOLDER = os.path.join('static', 'uploads')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# Load model with caching
+@st.cache_resource
+def load_covid_model():
+    return load_model('covid19_xray_model.h5')
 
-# Load the model
-model = load_model(MODEL_PATH)
+def preprocess_image(input_image):
+    img = input_image.convert('RGB').resize((256, 256))
+    return np.expand_dims(image.img_to_array(img), axis=0) / 255.0
 
-@app.route('/')
-def home():
-    return render_template('index.html')
+def predict_covid(input_image, model):
+    img_array = preprocess_image(input_image)
+    return model.predict(img_array)[0][0]
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    if 'file' not in request.files:
-        return 'No file uploaded!', 400
+# Main app
+def main():
+    st.title("🫁 COVID-19 Chest X-ray Classifier")
+    st.warning("⚠️ Medical Disclaimer: For educational purposes only. Not for actual diagnosis.")
+    
+    model = load_covid_model()
+    
+    st.sidebar.header("Instructions")
+    st.sidebar.markdown("1. Upload a chest X-ray\n2. Click 'Analyze'\n3. View results")
+    
+    uploaded_file = st.file_uploader("Choose an X-ray image...", type=['png', 'jpg', 'jpeg'])
+    
+    if uploaded_file:
+        image_pil = Image.open(uploaded_file)
+        st.image(image_pil, caption="Uploaded X-ray")
+        
+        if st.button("Analyze X-ray"):
+            with st.spinner("Analyzing..."):
+                prediction = predict_covid(image_pil, model)
+                confidence = prediction * 100 if prediction > 0.5 else (1 - prediction) * 100
+                result = "Positive" if prediction > 0.5 else "Negative"
+                
+                st.success(f"Result: {result} for COVID-19")
+                st.write(f"Confidence: {confidence:.1f}%")
+                st.progress(confidence / 100)
+                
+                if prediction > 0.5:
+                    st.error("High likelihood of COVID-19. Please consult a doctor.")
+                else:
+                    st.info("Low likelihood, but consult a doctor for clarity.")
 
-    file = request.files['file']
-    if file.filename == '':
-        return 'No file selected!', 400
-
-    # Save the uploaded image
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(filepath)
-
-    # Preprocess the image
-    img = image.load_img(filepath, target_size=(256, 256))
-    img_array = image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0) / 255.0
-
-    # Predict
-    prediction = model.predict(img_array)[0][0]
-    label = "Positive for COVID-19" if prediction > 0.5 else "Negative for COVID-19"
-    confidence = f"{prediction * 100:.2f}%" if prediction > 0.5 else f"{(1 - prediction) * 100:.2f}%"
-
-    return render_template('result.html', label=label, confidence=confidence, image=file.filename)
-
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    main()
